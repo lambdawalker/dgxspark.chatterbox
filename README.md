@@ -235,3 +235,8 @@ If you find this model useful, please consider citing.
 ```
 ## Disclaimer
 Don't use this model to do bad things. Prompts are sourced from freely available data on the internet.
+
+
+## HTTP API (DGX Spark / self-hosted)
+
+A separate FastAPI server provides queued generation jobs, voice registration, persisted status, and reconnectable SSE progress events. See [HTTP API documentation](docs/http-api.md) for installation and examples. The Gradio demos remain available unchanged.
