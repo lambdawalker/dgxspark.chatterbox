@@ -48,6 +48,66 @@ Choose the right model for your application.
 | Chatterbox [(Tips and Tricks)](#original-chatterbox-tips)                                                       | 500M | English | CFG & Exaggeration tuning                               | General zero-shot TTS with creative controls | [Demo](https://huggingface.co/spaces/ResembleAI/Chatterbox)              | [Listen](https://resemble-ai.github.io/chatterbox_demopage/) |
 
 ## Installation
+
+### DGX Spark (this fork)
+
+This fork targets NVIDIA DGX Spark's Linux ARM64 / GB10 GPU with **Python
+3.12, PyTorch 2.10.0+cu130 and TorchAudio 2.10.0+cu130**. Both packages have
+official CUDA 13.0 ARM64 wheels. `cu130` is the concrete CUDA 13.x wheel
+index; `cu13x` is not an index name. A compatible NVIDIA driver must already
+be installed (`nvidia-smi` must work). The wheels provide their CUDA runtime;
+a separately installed toolkit does not select the PyTorch wheel.
+
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then:
+
+```bash
+git clone https://github.com/lambdawalker/dgxspark.chatterbox.git
+cd dgxspark.chatterbox
+bash scripts/install_dgx_spark.sh
+```
+
+The installer creates `.venv` using Python 3.12, installs the committed
+`uv.lock`, checks dependency consistency, executes GPU matrix multiplication
+and TorchAudio resampling, checks WAV I/O, and imports Chatterbox. It does
+not download model weights. The lock also records a specific commit for the
+upstream Perth dependency. Re-running the installer reuses the environment.
+
+To download the Turbo model and generate an audible test:
+
+```bash
+uv run --no-sync python scripts/check_dgx_spark.py --synthesize
+# Listen to dgx-spark-smoke.wav, then launch the multilingual interface:
+uv run --no-sync python multilingual_app.py
+```
+
+Initial synthesis requires internet access to Hugging Face and downloads
+model weights. For a diagnostic report without synthesis, run
+`uv run --no-sync python scripts/check_dgx_spark.py` and include the complete
+output/traceback when reporting a problem. GPU execution and speech quality
+still need validation on a real Spark; dependency resolution is not proof
+of working inference.
+
+`pyproject.toml` explicitly routes Torch and TorchAudio to the CUDA 13.0
+index on Linux ARM64. Use `uv sync --locked` for subsequent environment
+updates. Plain `pip install -e .` does **not** read uv's index configuration,
+and `pip install chatterbox-tts` installs the upstream PyPI release instead
+of this fork. Other platforms retain their default PyPI package source.
+
+The examples write WAV files with SoundFile, moving generated tensors to
+CPU and converting channels-first tensors to frames-first arrays. This
+avoids the TorchCodec/FFmpeg dependency introduced by newer
+`torchaudio.save`; TorchAudio remains installed for model DSP operations.
+If installation reports missing native build tools, install `build-essential`
+and `git`; if SoundFile cannot load libsndfile, install `libsndfile1` using
+Ubuntu's package manager. No system packages or drivers are changed by the
+installer.
+
+References: [PyTorch release installation commands](https://pytorch.org/get-started/previous-versions/),
+[CUDA 13 Torch wheels](https://download.pytorch.org/whl/cu130/torch/),
+[CUDA 13 TorchAudio wheels](https://download.pytorch.org/whl/cu130/torchaudio/).
+
+### Upstream installation (not the DGX Spark setup)
+
 ```shell
 pip install chatterbox-tts
 ```
@@ -68,7 +128,7 @@ We developed and tested Chatterbox on Python 3.11 on Debian 11 OS; the versions 
 ##### Chatterbox-Turbo
 
 ```python
-import torchaudio as ta
+import soundfile as sf
 import torch
 from chatterbox.tts_turbo import ChatterboxTurboTTS
 
@@ -81,7 +141,7 @@ text = "Hi there, Sarah here from MochaFone calling you back [chuckle], have you
 # Generate audio (requires a reference clip for voice cloning)
 wav = model.generate(text, audio_prompt_path="your_10s_ref_clip.wav")
 
-ta.save("test-turbo.wav", wav, model.sr)
+sf.write("test-turbo.wav", wav.detach().cpu().numpy().T, model.sr)
 ```
 
 ##### Chatterbox-Nano
@@ -89,7 +149,7 @@ ta.save("test-turbo.wav", wav, model.sr)
 Nano shares Turbo's architecture and is loaded through the same `ChatterboxTurboTTS` class by passing `nano=True`:
 
 ```python
-import torchaudio as ta
+import soundfile as sf
 import torch
 from chatterbox.tts_turbo import ChatterboxTurboTTS
 
@@ -102,14 +162,14 @@ text = "Hi there, Sarah here from MochaFone calling you back [chuckle], have you
 # Generate audio (requires a reference clip for voice cloning)
 wav = model.generate(text, audio_prompt_path="your_10s_ref_clip.wav")
 
-ta.save("test-nano.wav", wav, model.sr)
+sf.write("test-nano.wav", wav.detach().cpu().numpy().T, model.sr)
 ```
 
 ##### Chatterbox and Chatterbox-Multilingual
 
 ```python
 
-import torchaudio as ta
+import soundfile as sf
 from chatterbox.tts import ChatterboxTTS
 from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 
@@ -120,7 +180,7 @@ model = ChatterboxTTS.from_pretrained(device=device)
 
 text = "Ezreal and Jinx teamed up with Ahri, Yasuo, and Teemo to take down the enemy's Nexus in an epic late-game pentakill."
 wav = model.generate(text)
-ta.save("test-english.wav", wav, model.sr)
+sf.write("test-english.wav", wav.detach().cpu().numpy().T, model.sr)
 
 # Multilingual V3 examples
 multilingual_model = ChatterboxMultilingualTTS.from_pretrained(device=device, t3_model="v3")
@@ -128,16 +188,16 @@ multilingual_model = ChatterboxMultilingualTTS.from_pretrained(device=device, t3
 
 french_text = "Bonjour, comment ça va? Ceci est le modèle de synthèse vocale multilingue Chatterbox, il prend en charge 23 langues."
 wav_french = multilingual_model.generate(french_text, language_id="fr")
-ta.save("test-french.wav", wav_french, multilingual_model.sr)
+sf.write("test-french.wav", wav_french.detach().cpu().numpy().T, multilingual_model.sr)
 
 chinese_text = "你好，今天天气真不错，希望你有一个愉快的周末。"
 wav_chinese = multilingual_model.generate(chinese_text, language_id="zh")
-ta.save("test-chinese.wav", wav_chinese, multilingual_model.sr)
+sf.write("test-chinese.wav", wav_chinese.detach().cpu().numpy().T, multilingual_model.sr)
 
 # If you want to synthesize with a different voice, specify the audio prompt
 AUDIO_PROMPT_PATH = "YOUR_FILE.wav"
 wav = model.generate(text, audio_prompt_path=AUDIO_PROMPT_PATH)
-ta.save("test-2.wav", wav, model.sr)
+sf.write("test-2.wav", wav.detach().cpu().numpy().T, model.sr)
 ```
 See `example_tts.py`, `example_tts_turbo.py`, `example_tts_nano.py`, and `example_vc.py` for more examples.
 
