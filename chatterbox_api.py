@@ -201,9 +201,9 @@ def validate(req):
     if req.model not in MODELS or req.model == "chatterbox-vc":
         raise HTTPException(422, "Choose a supported TTS model")
     if req.model in ("chatterbox-turbo", "chatterbox-nano"):
-        if req.cfg_weight != 0 or req.exaggeration != 0 or req.min_p != 0:
+        if any(k in req.model_fields_set and getattr(req, k) != 0 for k in ("cfg_weight", "exaggeration", "min_p")):
             raise HTTPException(422, "Turbo/Nano do not support cfg_weight, exaggeration, or min_p; use 0")
-    elif req.top_k != 1000 or not req.norm_loudness:
+    elif ("top_k" in req.model_fields_set or "norm_loudness" in req.model_fields_set):
         raise HTTPException(422, "top_k and norm_loudness are Turbo/Nano-only parameters")
     if req.model != "chatterbox-multilingual" and req.language_id:
         raise HTTPException(422, "language_id is available only for multilingual TTS")
@@ -213,7 +213,11 @@ def voice_path(voice_id):
     if voice_id is None:
         raise HTTPException(422, "reference_id is required; register a reference voice first")
     path = ROOT / "voices" / f"{voice_id}.wav"
-    if not path.is_file() or str(uuid.UUID(voice_id)) != voice_id:
+    try:
+        valid = str(uuid.UUID(voice_id)) == voice_id
+    except ValueError:
+        valid = False
+    if not path.is_file() or not valid:
         raise HTTPException(404, "Voice not found")
     return str(path)
 
@@ -309,9 +313,10 @@ async def create_vc_job(source: UploadFile = File(...), reference_id: str = Form
         raise HTTPException(422, f"Invalid WAV: {exc}") from exc
     source_id = str(uuid.uuid4())
     source_path = ROOT / f"{source_id}-input.wav"
+    reference = voice_path(reference_id)
     source_path.write_bytes(data)
     return submit({"model": "chatterbox-vc", "source": str(source_path),
-                   "reference": voice_path(reference_id), "parameters": {}})
+                   "reference": reference, "parameters": {}})
 
 
 @app.get("/v1/jobs/{jid}", dependencies=[Depends(authorize)])
